@@ -1,0 +1,25 @@
+server:
+  port: 8080
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 2GB
+      max-request-size: 2GB
+  datasource:
+    url: jdbc:h2:file:./data/nightvision
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true   # http://localhost:8080/h2-console 로 DB 조회 가능
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+
+app:
+  python-server-url: http://localhost:8000 # 나중에 수정
+  upload-dir: ./uploads
+  result-dir: ./results
