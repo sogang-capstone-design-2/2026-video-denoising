@@ -1,0 +1,58 @@
+package com.nightvision.model;
+
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class JobTest {
+
+    @Test
+    void job생성시_초기상태가_올바르게_설정된다() {
+        Job job = new Job("id-1", "general", "test.mp4");
+
+        assertThat(job.getJobId()).isEqualTo("id-1");
+        assertThat(job.getMode()).isEqualTo("general");
+        assertThat(job.getOriginalFileName()).isEqualTo("test.mp4");
+        assertThat(job.getPhase()).isEqualTo(Job.Phase.UPLOADING);
+        assertThat(job.getPercent()).isEqualTo(0);
+        assertThat(job.getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    void job생성시_완료상태와_실패상태가_아니다() {
+        Job job = new Job("id-1", "general", "test.mp4");
+
+        assertThat(job.isDone()).isFalse();
+        assertThat(job.isFailed()).isFalse();
+    }
+
+    @Test
+    void DONE_phase일때만_isDone이_true를_반환한다() {
+        Job job = new Job("id-1", "general", "test.mp4");
+
+        for (Job.Phase phase : Job.Phase.values()) {
+            job.setPhase(phase);
+            assertThat(job.isDone()).isEqualTo(phase == Job.Phase.DONE);
+        }
+    }
+
+    @Test
+    void FAILED_phase일때만_isFailed가_true를_반환한다() {
+        Job job = new Job("id-1", "general", "test.mp4");
+
+        for (Job.Phase phase : Job.Phase.values()) {
+            job.setPhase(phase);
+            assertThat(job.isFailed()).isEqualTo(phase == Job.Phase.FAILED);
+        }
+    }
+
+    @Test
+    void isDone과_isFailed가_동시에_true인_경우는_없다() {
+        Job job = new Job("id-1", "general", "test.mp4");
+
+        for (Job.Phase phase : Job.Phase.values()) {
+            job.setPhase(phase);
+            assertThat(job.isDone() && job.isFailed()).isFalse();
+        }
+    }
+}
