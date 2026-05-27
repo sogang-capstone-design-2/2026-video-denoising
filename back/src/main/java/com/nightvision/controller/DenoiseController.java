@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,25 +25,25 @@ public class DenoiseController {
     private final DenoiseService denoiseService;
 
     /**
-     * POST /api/denoise/{mode}
-     * 파일 업로드 → jobId 즉시 반환 (비동기 처리 시작)
+     * S2.1 — POST /api/jobs
+     * 파일 업로드 → DB 저장(QUEUED) → 비동기 처리 시작 → 201 반환
      */
-    @PostMapping("/denoise/{mode}")
-    public ResponseEntity<Map<String, String>> upload(
-            @PathVariable String mode,
+    @PostMapping("/jobs")
+    public ResponseEntity<Map<String, String>> createJob(
             @RequestParam("file") MultipartFile file,
+            @RequestParam String mode,
             @RequestParam(defaultValue = "medium") String intensity
     ) {
         String jobId = denoiseService.submit(file, mode, intensity);
-        return ResponseEntity.ok(Map.of("jobId", jobId));
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("jobId", jobId));
     }
 
     /**
-     * GET /api/jobs/{jobId}/status
-     * 처리 상태 폴링
+     * S2.4 — GET /api/jobs/{id}/status
+     * 폴링용 상태 조회
      * Response: { "phase": "processing", "percent": 65 }
-     *           { "phase": "done",       "percent": 100, "resultUrl": "/api/jobs/{jobId}/file" }
-     *           { "phase": "failed",     "error": "..." }
+     *           { "phase": "done",       "percent": 100, "resultUrl": "/api/jobs/{id}/file" }
+     *           { "phase": "failed",     "percent": N,   "error": "..." }
      */
     @GetMapping("/jobs/{jobId}/status")
     public ResponseEntity<Map<String, Object>> getStatus(@PathVariable String jobId) {

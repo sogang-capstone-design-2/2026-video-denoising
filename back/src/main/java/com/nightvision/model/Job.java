@@ -13,8 +13,13 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 public class Job {
 
+    /**
+     * QUEUED ──▶ UPLOADING ──▶ PROCESSING ──▶ FINALIZING ──▶ DONE
+     *                               │
+     *                               └─────▶ FAILED
+     */
     public enum Phase {
-        UPLOADING, PROCESSING, FINALIZING, DONE, FAILED
+        QUEUED, UPLOADING, PROCESSING, FINALIZING, DONE, FAILED
     }
 
     @Id
@@ -24,7 +29,7 @@ public class Job {
     private String originalFileName;
 
     @Enumerated(EnumType.STRING)
-    private volatile Phase phase = Phase.UPLOADING;
+    private volatile Phase phase = Phase.QUEUED;
 
     private volatile int percent = 0;
     private volatile String resultPath;

@@ -56,21 +56,23 @@ class DenoiseServiceTest {
     }
 
     @Test
-    void 파일제출시_job을_DB에_저장한다() {
+    void 파일제출시_QUEUED_상태로_DB에_저장한다() {
         MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "data".getBytes());
 
-        denoiseService.submit(file, "general", "medium");
+        String jobId = denoiseService.submit(file, "general", "medium");
+        Job job = denoiseService.getJob(jobId);
 
+        assertThat(job.getPhase()).isEqualTo(Job.Phase.QUEUED);
         verify(jobRepository).save(any(Job.class));
     }
 
     @Test
-    void 파일제출시_비동기_처리를_시작한다() {
+    void 파일제출시_비동기_추론을_시작한다() {
         MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "data".getBytes());
 
         denoiseService.submit(file, "general", "medium");
 
-        verify(jobProcessor).process(any(Job.class), any(Path.class), eq("medium"));
+        verify(jobProcessor).runInference(any(Job.class), any(Path.class), eq("medium"));
     }
 
     @Test
