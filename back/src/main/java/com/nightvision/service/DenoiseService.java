@@ -28,16 +28,21 @@ public class DenoiseService {
     // 처리 중인 Job은 메모리에 유지 → 폴링 응답 속도 확보
     private final Map<String, Job> activeJobs = new ConcurrentHashMap<>();
 
+    /**
+     * S2.1 — 파일 저장 → QUEUED 상태로 DB 저장 → 비동기 처리 시작 → jobId 반환
+     */
     public String submit(MultipartFile file, String mode, String intensity) {
         String jobId = UUID.randomUUID().toString();
         Job job = new Job(jobId, mode, file.getOriginalFilename());
+        // 초기 상태: QUEUED
+        job.setPhase(Job.Phase.QUEUED);
 
         activeJobs.put(jobId, job);
         jobRepository.save(job);
 
         try {
             Path inputPath = saveUploadedFile(jobId, file);
-            jobProcessor.process(job, inputPath, intensity);
+            jobProcessor.runInference(job, inputPath, intensity);
         } catch (IOException e) {
             job.setPhase(Job.Phase.FAILED);
             job.setErrorMessage("파일 저장 실패: " + e.getMessage());

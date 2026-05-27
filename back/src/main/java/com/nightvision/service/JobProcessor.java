@@ -12,6 +12,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
+ * S2.3 — JobService.runInference()
+ * 비동기 처리, 상태 전이 5단계 DB 반영 + 실패 시 FAILED
+ *
+ * QUEUED ──▶ UPLOADING ──▶ PROCESSING ──▶ FINALIZING ──▶ DONE
+ *                               │
+ *                               └─────▶ FAILED
+ *
  * @Async가 동일 클래스 내 자가 호출 시 프록시를 우회하는 문제를 피하기 위해
  * DenoiseService와 분리된 컴포넌트.
  */
@@ -19,42 +26,51 @@ import java.nio.file.Path;
 @RequiredArgsConstructor
 public class JobProcessor {
 
-    private final PythonInferenceClient inferenceClient;
+    private final InferenceClient inferenceClient;
     private final JobRepository jobRepository;
 
     @Value("${app.result-dir}")
     private String resultDir;
 
     @Async("denoiseExecutor")
-    public void process(Job job, Path inputPath, String intensity) {
+    public void runInference(Job job, Path inputPath, String intensity) {
         try {
-            job.setPhase(Job.Phase.UPLOADING);
-            job.setPercent(30);
+            // 1. QUEUED → UPLOADING
+            transition(job, Job.Phase.UPLOADING, 10);
 
-            job.setPhase(Job.Phase.PROCESSING);
-            job.setPercent(35);
+            // 2. 업로드 완료
+            transition(job, Job.Phase.UPLOADING, 30);
+
+            // 3. UPLOADING → PROCESSING : Python 추론 서버 호출
+            transition(job, Job.Phase.PROCESSING, 35);
 
             byte[] resultBytes = inferenceClient.infer(inputPath, job.getMode(), intensity);
 
-            job.setPercent(90);
+            transition(job, Job.Phase.PROCESSING, 80);
 
-            job.setPhase(Job.Phase.FINALIZING);
-            job.setPercent(95);
+            // 4. PROCESSING → FINALIZING : 결과 파일 저장
+            transition(job, Job.Phase.FINALIZING, 90);
 
             Path resultPath = saveResult(job.getJobId(), job.getOriginalFileName(), resultBytes);
             job.setResultPath(resultPath.toString());
 
-            job.setPercent(100);
-            job.setPhase(Job.Phase.DONE);
+            // 5. FINALIZING → DONE
+            transition(job, Job.Phase.DONE, 100);
 
         } catch (Exception e) {
-            job.setPhase(Job.Phase.FAILED);
             job.setErrorMessage(e.getMessage());
-
-        } finally {
-            // 처리 완료(성공/실패) 시 최종 상태를 DB에 저장
-            jobRepository.save(job);
+            transition(job, Job.Phase.FAILED, job.getPercent());
         }
+    }
+
+    /**
+     * 상태 전이 + DB 즉시 저장
+     * 폴링 요청이 항상 최신 상태를 읽을 수 있도록 매 단계마다 persist.
+     */
+    private void transition(Job job, Job.Phase phase, int percent) {
+        job.setPhase(phase);
+        job.setPercent(percent);
+        jobRepository.save(job);
     }
 
     private Path saveResult(String jobId, String originalFileName, byte[] bytes) throws IOException {

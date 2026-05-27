@@ -30,17 +30,20 @@ class DenoiseControllerTest {
     private DenoiseService denoiseService;
 
     // ──────────────────────────────────────────
-    // POST /api/denoise/{mode}
+    // POST /api/jobs
     // ──────────────────────────────────────────
 
     @Test
-    void 파일업로드시_jobId를_반환한다() throws Exception {
+    void 파일업로드시_201과_jobId를_반환한다() throws Exception {
         given(denoiseService.submit(any(), anyString(), anyString())).willReturn("test-job-id");
 
         MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "content".getBytes());
 
-        mockMvc.perform(multipart("/api/denoise/general").file(file))
-                .andExpect(status().isOk())
+        mockMvc.perform(multipart("/api/jobs")
+                        .file(file)
+                        .param("mode", "general")
+                        .param("intensity", "medium"))
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.jobId").value("test-job-id"));
     }
 
@@ -54,6 +57,19 @@ class DenoiseControllerTest {
 
         mockMvc.perform(get("/api/jobs/unknown/status"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void 대기중인_job_상태조회시_queued_phase를_반환한다() throws Exception {
+        Job job = new Job("job-1", "general", "test.mp4");
+        job.setPhase(Job.Phase.QUEUED);
+        job.setPercent(0);
+        given(denoiseService.getJob("job-1")).willReturn(job);
+
+        mockMvc.perform(get("/api/jobs/job-1/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phase").value("queued"))
+                .andExpect(jsonPath("$.percent").value(0));
     }
 
     @Test

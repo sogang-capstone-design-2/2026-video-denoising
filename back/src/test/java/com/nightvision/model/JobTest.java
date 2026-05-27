@@ -7,13 +7,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class JobTest {
 
     @Test
-    void job생성시_초기상태가_올바르게_설정된다() {
+    void job생성시_초기상태가_QUEUED로_설정된다() {
         Job job = new Job("id-1", "general", "test.mp4");
 
         assertThat(job.getJobId()).isEqualTo("id-1");
         assertThat(job.getMode()).isEqualTo("general");
         assertThat(job.getOriginalFileName()).isEqualTo("test.mp4");
-        assertThat(job.getPhase()).isEqualTo(Job.Phase.UPLOADING);
+        assertThat(job.getPhase()).isEqualTo(Job.Phase.QUEUED);
         assertThat(job.getPercent()).isEqualTo(0);
         assertThat(job.getCreatedAt()).isNotNull();
     }

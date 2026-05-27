@@ -23,3 +23,6 @@ app:
   python-server-url: http://localhost:8000 # 나중에 수정
   upload-dir: ./uploads
   result-dir: ./results
+  inference:
+    timeout-minutes: 10   # Python 추론 타임아웃
+    max-retries: 2        # 실패 시 재시도 횟수
