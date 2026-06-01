@@ -23,3 +23,5 @@ out/
 ### Uploads & Results (runtime directories) ###
 uploads/
 results/
+
+data/nightvision.mv.db
