@@ -1,6 +1,9 @@
+import asyncio
 import os
 import tempfile
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+load_dotenv()
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
@@ -55,7 +58,10 @@ async def infer(
                 os.remove(path)
 
     try:
-        models[mode].infer(input_path, output_path)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, lambda: models[mode].infer(input_path, output_path, intensity)
+        )
         return FileResponse(
             path=output_path,
             media_type="application/octet-stream",
