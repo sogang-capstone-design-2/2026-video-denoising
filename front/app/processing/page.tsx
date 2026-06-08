@@ -4,11 +4,14 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { loadUploadSession, saveResultSession } from "@/lib/session";
-import { runMockJob } from "@/lib/mockApi";
-import type { UploadProgress } from "@/lib/mockApi";
+import { getFile, clearFile } from "@/lib/fileStore";
+import { submitJob, pollUntilDone } from "@/lib/api";
+import type { JobPhase } from "@/lib/api";
 import type { UploadSession } from "@/types";
 
-const PHASE_LABELS: Record<UploadProgress["phase"], string> = {
+type UiPhase = "uploading" | "processing" | "finalizing";
+
+const PHASE_LABELS: Record<UiPhase, string> = {
   uploading: "파일 업로드 중...",
   processing: "AI 처리 중...",
   finalizing: "결과 준비 중...",
@@ -20,36 +23,82 @@ const STEPS = [
   { key: "finalizing", label: "완료" },
 ] as const;
 
+function toUiPhase(phase: JobPhase): UiPhase {
+  if (phase === "processing") return "processing";
+  if (phase === "finalizing" || phase === "done") return "finalizing";
+  return "uploading";
+}
+
 export default function ProcessingPage() {
   const router = useRouter();
   const [progress, setProgress] = useState(0);
-  const [phase, setPhase] = useState<UploadProgress["phase"]>("uploading");
+  const [phase, setPhase] = useState<UiPhase>("uploading");
   const [session, setSession] = useState<UploadSession | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const s = loadUploadSession();
-    if (!s) {
+    const file = getFile();
+
+    if (!s || !file) {
       router.replace("/select");
       return;
     }
     setSession(s);
 
-    runMockJob((p) => {
-      setProgress(p.percent);
-      setPhase(p.phase);
-    }).then(() => {
-      saveResultSession({
-        mode: s.mode,
-        fileName: s.fileName,
-        beforeUrl: s.previewUrl ?? "/placeholder-before.jpg",
-        afterUrl: s.previewUrl ?? "/placeholder-after.jpg",
-      });
-      router.push("/result");
-    });
+    (async () => {
+      try {
+        setPhase("uploading");
+        setProgress(10);
+
+        const jobId = await submitJob(file, s.intensity);
+        clearFile();
+
+        setProgress(30);
+
+        await pollUntilDone(
+          jobId,
+          (status) => {
+            setPhase(toUiPhase(status.phase));
+            setProgress(status.percent);
+          }
+        );
+
+        saveResultSession({
+          mode: s.mode,
+          fileName: s.fileName,
+          beforeUrl: `/api/jobs/${jobId}/files/before`,
+          afterUrl: `/api/jobs/${jobId}/files/after`,
+        });
+        router.push("/result");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "알 수 없는 오류가 발생했습니다.");
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const currentStepIndex = STEPS.findIndex((s) => s.key === phase);
+
+  if (error) {
+    return (
+      <main className="min-h-screen bg-[#08080c] flex flex-col items-center justify-center px-6">
+        <div className="w-full max-w-sm text-center">
+          <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-red-500/15 border border-red-500/25 flex items-center justify-center text-2xl">
+            ⚠️
+          </div>
+          <p className="text-sm text-red-400 mb-2">처리 중 오류가 발생했습니다</p>
+          <p className="text-xs text-white/30 mb-8">{error}</p>
+          <button
+            onClick={() => router.back()}
+            className="px-6 py-2.5 rounded-full bg-white/6 hover:bg-white/10 border border-white/10 text-white/70 text-sm font-semibold transition-all"
+          >
+            돌아가기
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#08080c] flex flex-col items-center justify-center px-6">

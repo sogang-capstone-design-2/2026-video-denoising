@@ -12,6 +12,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -24,27 +27,25 @@ public class DenoiseController {
 
     private final DenoiseService denoiseService;
 
-    /**
-     * S2.1 — POST /api/jobs
-     * 파일 업로드 → DB 저장(QUEUED) → 비동기 처리 시작 → 201 반환
-     */
+    // ──────────────────────────────────────────
+    // S2.1 — POST /api/jobs
+    // ──────────────────────────────────────────
+
     @PostMapping("/jobs")
     public ResponseEntity<Map<String, String>> createJob(
             @RequestParam("file") MultipartFile file,
-            @RequestParam String mode,
-            @RequestParam(defaultValue = "medium") String intensity
+            @RequestParam(defaultValue = "25") float noiseSigma,
+            @RequestParam(defaultValue = "false") boolean addNoise,
+            @RequestParam(defaultValue = "false") boolean compare
     ) {
-        String jobId = denoiseService.submit(file, mode, intensity);
+        String jobId = denoiseService.submit(file, noiseSigma, addNoise, compare);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("jobId", jobId));
     }
 
-    /**
-     * S2.4 — GET /api/jobs/{id}/status
-     * 폴링용 상태 조회
-     * Response: { "phase": "processing", "percent": 65 }
-     *           { "phase": "done",       "percent": 100, "resultUrl": "/api/jobs/{id}/file" }
-     *           { "phase": "failed",     "percent": N,   "error": "..." }
-     */
+    // ──────────────────────────────────────────
+    // S2.4 — GET /api/jobs/{id}/status
+    // ──────────────────────────────────────────
+
     @GetMapping("/jobs/{jobId}/status")
     public ResponseEntity<Map<String, Object>> getStatus(@PathVariable String jobId) {
         Job job = denoiseService.getJob(jobId);
@@ -57,7 +58,7 @@ public class DenoiseController {
         response.put("percent", job.getPercent());
 
         if (job.isDone()) {
-            response.put("resultUrl", "/api/jobs/" + jobId + "/file");
+            response.put("resultUrl", "/api/jobs/" + jobId + "/result");
         }
         if (job.isFailed()) {
             response.put("error", job.getErrorMessage());
@@ -66,31 +67,101 @@ public class DenoiseController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * GET /api/jobs/{jobId}/file
-     * 처리 완료된 결과 파일 다운로드
-     */
-    @GetMapping("/jobs/{jobId}/file")
-    public ResponseEntity<Resource> getResultFile(@PathVariable String jobId) {
+    // ──────────────────────────────────────────
+    // S3.1 — GET /api/jobs/{id}/result
+    // ──────────────────────────────────────────
+
+    @GetMapping("/jobs/{jobId}/result")
+    public ResponseEntity<Map<String, Object>> getResult(@PathVariable String jobId) {
+        Job job = denoiseService.getJob(jobId);
+        if (job == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // 처리 중 → 202 Accepted
+        if (!job.isDone()) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("phase", job.getPhase().name().toLowerCase());
+            response.put("percent", job.getPercent());
+            return ResponseEntity.accepted().body(response);
+        }
+
+        // 완료 → 200 OK + 메타데이터
+        Map<String, Object> result = new HashMap<>();
+        result.put("jobId", job.getJobId());
+        result.put("noiseSigma", job.getNoiseSigma());
+        result.put("addNoise", job.isAddNoise());
+        result.put("compare", job.isCompare());
+        result.put("fileName", job.getOriginalFileName());
+        result.put("createdAt", job.getCreatedAt());
+        result.put("beforeUrl", "/api/jobs/" + jobId + "/files/before");
+        result.put("afterUrl",  "/api/jobs/" + jobId + "/files/after");
+        return ResponseEntity.ok(result);
+    }
+
+    // ──────────────────────────────────────────
+    // S3.2 — GET /api/jobs/{id}/files/before
+    // ──────────────────────────────────────────
+
+    @GetMapping("/jobs/{jobId}/files/before")
+    public ResponseEntity<Resource> getBeforeFile(@PathVariable String jobId) {
+        Job job = denoiseService.getJob(jobId);
+        if (job == null || job.getInputPath() == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Path filePath = Path.of(job.getInputPath());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename*=UTF-8''" + encodeFilename(job.getOriginalFileName()))
+                .contentType(MediaType.parseMediaType(detectContentType(filePath)))
+                .body(new FileSystemResource(filePath));
+    }
+
+    // ──────────────────────────────────────────
+    // S3.3 — GET /api/jobs/{id}/files/after
+    // ──────────────────────────────────────────
+
+    @GetMapping("/jobs/{jobId}/files/after")
+    public ResponseEntity<Resource> getAfterFile(@PathVariable String jobId) {
         Job job = denoiseService.getJob(jobId);
         if (job == null || !job.isDone() || job.getResultPath() == null) {
             return ResponseEntity.notFound().build();
         }
 
-        Resource resource = new FileSystemResource(Path.of(job.getResultPath()));
+        Path filePath = Path.of(job.getResultPath());
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"denoised_" + job.getOriginalFileName() + "\"")
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .body(resource);
+                        "attachment; filename*=UTF-8''" + encodeFilename("denoised_" + job.getOriginalFileName()))
+                .contentType(MediaType.parseMediaType(detectContentType(filePath)))
+                .body(new FileSystemResource(filePath));
     }
 
-    /**
-     * GET /api/jobs/recent
-     * 최근 작업 목록 10개 (프론트 "최근 작업" 패널용)
-     */
-    @GetMapping("/jobs/recent")
-    public ResponseEntity<List<Job>> getRecentJobs() {
-        return ResponseEntity.ok(denoiseService.getRecentJobs());
+    // ──────────────────────────────────────────
+    // S3.4 — GET /api/jobs
+    // ──────────────────────────────────────────
+
+    @GetMapping("/jobs")
+    public ResponseEntity<List<Job>> getJobs(
+            @RequestParam(defaultValue = "10") int limit
+    ) {
+        return ResponseEntity.ok(denoiseService.getJobs(limit));
+    }
+
+    // ──────────────────────────────────────────
+    // 공통 유틸
+    // ──────────────────────────────────────────
+
+    private String detectContentType(Path filePath) {
+        try {
+            String type = java.nio.file.Files.probeContentType(filePath);
+            return type != null ? type : MediaType.APPLICATION_OCTET_STREAM_VALUE;
+        } catch (IOException e) {
+            return MediaType.APPLICATION_OCTET_STREAM_VALUE;
+        }
+    }
+
+    private String encodeFilename(String filename) {
+        return URLEncoder.encode(filename, StandardCharsets.UTF_8).replace("+", "%20");
     }
 }

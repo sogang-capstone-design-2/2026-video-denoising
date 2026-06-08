@@ -21,8 +21,11 @@ import java.time.Duration;
 @Component
 public class InferenceClient {
 
-    @Value("${app.python-server-url}")
-    private String pythonServerUrl;
+    @Value("${app.inference-base-url}")
+    private String inferenceBaseUrl;
+
+    @Value("${app.inference-api-key}")
+    private String inferenceApiKey;
 
     @Value("${app.inference.timeout-minutes:10}")
     private int timeoutMinutes;
@@ -35,26 +38,28 @@ public class InferenceClient {
     @PostConstruct
     public void init() {
         this.webClient = WebClient.builder()
-                .baseUrl(pythonServerUrl)
+                .baseUrl(inferenceBaseUrl)
                 .codecs(config -> config.defaultCodecs()
-                        .maxInMemorySize(512 * 1024 * 1024)) // 영상이기 때문에 512MB
+                        .maxInMemorySize(512 * 1024 * 1024))
                 .build();
     }
 
     /**
-     * POST /infer 호출 → 처리된 파일 바이트 반환
+     * POST /denoise 호출 → 처리된 mp4 바이트 반환
      * - 타임아웃: app.inference.timeout-minutes (기본 10분)
      * - 재시도: app.inference.max-retries (기본 2회, 3초 백오프)
      *   단, 4xx 클라이언트 오류는 재시도하지 않음
      */
-    public byte[] infer(Path inputFile, String mode, String intensity) {
+    public byte[] denoise(Path inputFile, float noiseSigma, boolean addNoise, boolean compare) {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("file", new FileSystemResource(inputFile));
-        body.add("mode", mode);
-        body.add("intensity", intensity);
+        body.add("noise_sigma", noiseSigma);
+        body.add("add_noise", addNoise);
+        body.add("compare", compare);
 
         return webClient.post()
-                .uri("/infer")
+                .uri("/denoise")
+                .header("X-API-Key", inferenceApiKey)
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .bodyValue(body)
                 .retrieve()

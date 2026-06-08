@@ -14,8 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -35,14 +34,26 @@ class DenoiseControllerTest {
 
     @Test
     void 파일업로드시_201과_jobId를_반환한다() throws Exception {
-        given(denoiseService.submit(any(), anyString(), anyString())).willReturn("test-job-id");
+        given(denoiseService.submit(any(), anyFloat(), anyBoolean(), anyBoolean())).willReturn("test-job-id");
 
         MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "content".getBytes());
 
         mockMvc.perform(multipart("/api/jobs")
                         .file(file)
-                        .param("mode", "general")
-                        .param("intensity", "medium"))
+                        .param("noiseSigma", "25")
+                        .param("addNoise", "false")
+                        .param("compare", "false"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.jobId").value("test-job-id"));
+    }
+
+    @Test
+    void 파일업로드시_파라미터_생략하면_기본값으로_처리된다() throws Exception {
+        given(denoiseService.submit(any(), anyFloat(), anyBoolean(), anyBoolean())).willReturn("test-job-id");
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "content".getBytes());
+
+        mockMvc.perform(multipart("/api/jobs").file(file))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.jobId").value("test-job-id"));
     }
@@ -61,9 +72,8 @@ class DenoiseControllerTest {
 
     @Test
     void 대기중인_job_상태조회시_queued_phase를_반환한다() throws Exception {
-        Job job = new Job("job-1", "general", "test.mp4");
+        Job job = new Job("job-1", "test.mp4", 25f, false, false);
         job.setPhase(Job.Phase.QUEUED);
-        job.setPercent(0);
         given(denoiseService.getJob("job-1")).willReturn(job);
 
         mockMvc.perform(get("/api/jobs/job-1/status"))
@@ -74,7 +84,7 @@ class DenoiseControllerTest {
 
     @Test
     void 처리중인_job_상태조회시_phase와_percent를_반환한다() throws Exception {
-        Job job = new Job("job-1", "general", "test.mp4");
+        Job job = new Job("job-1", "test.mp4", 25f, false, false);
         job.setPhase(Job.Phase.PROCESSING);
         job.setPercent(50);
         given(denoiseService.getJob("job-1")).willReturn(job);
@@ -87,19 +97,19 @@ class DenoiseControllerTest {
 
     @Test
     void 처리완료된_job_상태조회시_resultUrl이_포함된다() throws Exception {
-        Job job = new Job("job-1", "general", "test.mp4");
+        Job job = new Job("job-1", "test.mp4", 25f, false, false);
         job.setPhase(Job.Phase.DONE);
         job.setPercent(100);
         given(denoiseService.getJob("job-1")).willReturn(job);
 
         mockMvc.perform(get("/api/jobs/job-1/status"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.resultUrl").value("/api/jobs/job-1/file"));
+                .andExpect(jsonPath("$.resultUrl").value("/api/jobs/job-1/result"));
     }
 
     @Test
     void 처리실패한_job_상태조회시_에러메시지가_포함된다() throws Exception {
-        Job job = new Job("job-1", "general", "test.mp4");
+        Job job = new Job("job-1", "test.mp4", 25f, false, false);
         job.setPhase(Job.Phase.FAILED);
         job.setErrorMessage("Python 서버 연결 실패");
         given(denoiseService.getJob("job-1")).willReturn(job);
@@ -111,54 +121,124 @@ class DenoiseControllerTest {
     }
 
     // ──────────────────────────────────────────
-    // GET /api/jobs/{jobId}/file
+    // GET /api/jobs/{jobId}/result
     // ──────────────────────────────────────────
 
     @Test
-    void 처리중인_job의_파일요청시_404를_반환한다() throws Exception {
-        Job job = new Job("job-1", "general", "test.mp4");
-        job.setPhase(Job.Phase.PROCESSING);
-        given(denoiseService.getJob("job-1")).willReturn(job);
+    void 존재하지않는_jobId로_결과조회시_404를_반환한다() throws Exception {
+        given(denoiseService.getJob("unknown")).willReturn(null);
 
-        mockMvc.perform(get("/api/jobs/job-1/file"))
+        mockMvc.perform(get("/api/jobs/unknown/result"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void 처리완료된_job의_파일요청시_파일을_반환한다(@TempDir Path tempDir) throws Exception {
-        Path resultFile = tempDir.resolve("denoised_test.mp4");
-        Files.write(resultFile, "fake video content".getBytes());
+    void 처리중인_job_결과조회시_202를_반환한다() throws Exception {
+        Job job = new Job("job-1", "test.mp4", 25f, false, false);
+        job.setPhase(Job.Phase.PROCESSING);
+        job.setPercent(60);
+        given(denoiseService.getJob("job-1")).willReturn(job);
 
-        Job job = new Job("job-1", "general", "test.mp4");
+        mockMvc.perform(get("/api/jobs/job-1/result"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.phase").value("processing"))
+                .andExpect(jsonPath("$.percent").value(60));
+    }
+
+    @Test
+    void 처리완료된_job_결과조회시_200과_메타데이터를_반환한다() throws Exception {
+        Job job = new Job("job-1", "test.mp4", 30f, true, false);
+        job.setPhase(Job.Phase.DONE);
+        job.setPercent(100);
+        given(denoiseService.getJob("job-1")).willReturn(job);
+
+        mockMvc.perform(get("/api/jobs/job-1/result"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.jobId").value("job-1"))
+                .andExpect(jsonPath("$.noiseSigma").value(30.0))
+                .andExpect(jsonPath("$.addNoise").value(true))
+                .andExpect(jsonPath("$.compare").value(false))
+                .andExpect(jsonPath("$.fileName").value("test.mp4"))
+                .andExpect(jsonPath("$.beforeUrl").value("/api/jobs/job-1/files/before"))
+                .andExpect(jsonPath("$.afterUrl").value("/api/jobs/job-1/files/after"));
+    }
+
+    // ──────────────────────────────────────────
+    // GET /api/jobs/{jobId}/files/before
+    // ──────────────────────────────────────────
+
+    @Test
+    void inputPath가_없는_job의_before파일_요청시_404를_반환한다() throws Exception {
+        Job job = new Job("job-1", "test.mp4", 25f, false, false);
+        given(denoiseService.getJob("job-1")).willReturn(job);
+
+        mockMvc.perform(get("/api/jobs/job-1/files/before"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void 처리중인_job의_before파일_요청시_원본파일을_반환한다(@TempDir Path tempDir) throws Exception {
+        Path inputFile = tempDir.resolve("test.mp4");
+        Files.write(inputFile, "original video".getBytes());
+
+        Job job = new Job("job-1", "test.mp4", 25f, false, false);
+        job.setPhase(Job.Phase.PROCESSING);
+        job.setInputPath(inputFile.toString());
+        given(denoiseService.getJob("job-1")).willReturn(job);
+
+        mockMvc.perform(get("/api/jobs/job-1/files/before"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", "attachment; filename=\"test.mp4\""));
+    }
+
+    // ──────────────────────────────────────────
+    // GET /api/jobs/{jobId}/files/after
+    // ──────────────────────────────────────────
+
+    @Test
+    void 처리중인_job의_after파일_요청시_404를_반환한다() throws Exception {
+        Job job = new Job("job-1", "test.mp4", 25f, false, false);
+        job.setPhase(Job.Phase.PROCESSING);
+        given(denoiseService.getJob("job-1")).willReturn(job);
+
+        mockMvc.perform(get("/api/jobs/job-1/files/after"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void 처리완료된_job의_after파일_요청시_denoised_접두사로_반환한다(@TempDir Path tempDir) throws Exception {
+        Path resultFile = tempDir.resolve("denoised_test.mp4");
+        Files.write(resultFile, "denoised video".getBytes());
+
+        Job job = new Job("job-1", "test.mp4", 25f, false, false);
         job.setPhase(Job.Phase.DONE);
         job.setResultPath(resultFile.toString());
         given(denoiseService.getJob("job-1")).willReturn(job);
 
-        mockMvc.perform(get("/api/jobs/job-1/file"))
+        mockMvc.perform(get("/api/jobs/job-1/files/after"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Disposition", "attachment; filename=\"denoised_test.mp4\""));
     }
 
     // ──────────────────────────────────────────
-    // GET /api/jobs/recent
+    // GET /api/jobs
     // ──────────────────────────────────────────
 
     @Test
-    void 최근작업_조회시_빈목록을_반환한다() throws Exception {
-        given(denoiseService.getRecentJobs()).willReturn(List.of());
+    void 작업목록_조회시_기본_10개를_반환한다() throws Exception {
+        given(denoiseService.getJobs(10)).willReturn(List.of());
 
-        mockMvc.perform(get("/api/jobs/recent"))
-                .andExpect(status().isOk())
-                .andExpect(content().json("[]"));
+        mockMvc.perform(get("/api/jobs"))
+                .andExpect(status().isOk());
     }
 
     @Test
-    void 최근작업_조회시_작업목록을_반환한다() throws Exception {
-        Job job = new Job("job-1", "general", "test.mp4");
-        given(denoiseService.getRecentJobs()).willReturn(List.of(job));
+    void 작업목록_조회시_limit_파라미터가_적용된다() throws Exception {
+        Job job = new Job("job-1", "test.mp4", 25f, false, false);
+        given(denoiseService.getJobs(5)).willReturn(List.of(job));
 
-        mockMvc.perform(get("/api/jobs/recent"))
+        mockMvc.perform(get("/api/jobs").param("limit", "5"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].jobId").value("job-1"));
+                .andExpect(jsonPath("$[0].noiseSigma").value(25.0));
     }
 }
