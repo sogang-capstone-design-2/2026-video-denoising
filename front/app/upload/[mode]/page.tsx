@@ -7,6 +7,7 @@ import DropZone from "@/components/upload/DropZone";
 import GeneralOptions from "@/components/upload/GeneralOptions";
 import LowLightOptions from "@/components/upload/LowLightOptions";
 import { saveUploadSession } from "@/lib/session";
+import { setFile } from "@/lib/fileStore";
 import type { Mode, ProcessingIntensity } from "@/types";
 
 interface Props {
@@ -42,6 +43,7 @@ export default function UploadPage({ params }: Props) {
       previewUrl = await readFileAsDataUrl(selectedFile);
     }
 
+    setFile(selectedFile);
     saveUploadSession({
       mode,
       intensity,

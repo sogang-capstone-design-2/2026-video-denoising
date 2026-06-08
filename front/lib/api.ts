@@ -1,0 +1,73 @@
+import type { ProcessingIntensity } from "@/types";
+
+export type JobPhase = "queued" | "uploading" | "processing" | "finalizing" | "done" | "failed";
+
+export interface JobStatus {
+  phase: JobPhase;
+  percent: number;
+  resultUrl?: string;
+  error?: string;
+}
+
+const INTENSITY_TO_SIGMA: Record<ProcessingIntensity, number> = {
+  low: 15,
+  medium: 25,
+  high: 40,
+};
+
+export async function submitJob(
+  file: File,
+  intensity: ProcessingIntensity,
+  addNoise = false,
+  compare = false
+): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("noiseSigma", String(INTENSITY_TO_SIGMA[intensity]));
+  form.append("addNoise", String(addNoise));
+  form.append("compare", String(compare));
+
+  const res = await fetch("/api/jobs", { method: "POST", body: form });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(`업로드 실패 (${res.status}): ${msg}`);
+  }
+  const data = await res.json();
+  return data.jobId as string;
+}
+
+export async function getJobStatus(jobId: string): Promise<JobStatus> {
+  const res = await fetch(`/api/jobs/${jobId}/status`);
+  if (!res.ok) throw new Error(`상태 조회 실패 (${res.status})`);
+  return res.json() as Promise<JobStatus>;
+}
+
+/**
+ * Polls /api/jobs/{jobId}/status until done or failed.
+ * Calls onProgress on every tick. Rejects on failure or error phase.
+ */
+export async function pollUntilDone(
+  jobId: string,
+  onProgress: (status: JobStatus) => void,
+  intervalMs = 1500
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      try {
+        const status = await getJobStatus(jobId);
+        onProgress(status);
+
+        if (status.phase === "done") {
+          resolve();
+        } else if (status.phase === "failed") {
+          reject(new Error(status.error ?? "처리 실패"));
+        } else {
+          setTimeout(tick, intervalMs);
+        }
+      } catch (err) {
+        reject(err);
+      }
+    };
+    tick();
+  });
+}

@@ -4,16 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import BeforeAfterSlider from "@/components/result/BeforeAfterSlider";
 import { loadResultSession, clearSessions } from "@/lib/session";
 import type { ResultSession } from "@/types";
-
-function downloadDataUrl(dataUrl: string, fileName: string) {
-  const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = `denoised_${fileName}`;
-  a.click();
-}
 
 export default function ResultPage() {
   const router = useRouter();
@@ -35,8 +27,6 @@ export default function ResultPage() {
 
   if (!result) return null;
 
-  const hasImage = result.beforeUrl.startsWith("data:");
-
   return (
     <main className="min-h-screen bg-[#08080c] flex flex-col">
       {/* Nav */}
@@ -55,7 +45,7 @@ export default function ResultPage() {
         </div>
       </nav>
 
-      <div className="flex-1 flex flex-col items-center justify-start px-6 py-10 max-w-4xl mx-auto w-full">
+      <div className="flex-1 flex flex-col items-center justify-start px-6 py-10 max-w-5xl mx-auto w-full">
         {/* Success badge */}
         <motion.div
           initial={{ opacity: 0, y: -10 }}
@@ -65,43 +55,33 @@ export default function ResultPage() {
           ✓ 처리가 완료되었습니다
         </motion.div>
 
-        {/* File name */}
         <p className="text-sm text-white/40 mb-8">{result.fileName}</p>
 
-        {/* Before/After slider */}
+        {/* Before / After video players */}
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5 }}
-          className="w-full mb-8"
+          className="w-full mb-8 grid grid-cols-2 gap-4"
         >
-          {hasImage ? (
-            <BeforeAfterSlider
-              beforeUrl={result.beforeUrl}
-              afterUrl={result.afterUrl}
-              beforeLabel="원본 (Noisy)"
-              afterLabel="처리 후 (Denoised)"
-            />
-          ) : (
-            /* Non-image file: show placeholder comparison */
-            <div className="relative rounded-2xl overflow-hidden bg-[#111118] border border-white/8">
-              <div className="grid grid-cols-2" style={{ aspectRatio: "16/9" }}>
-                <div className="flex flex-col items-center justify-center bg-[#0d0d14] border-r border-white/8">
-                  <span className="text-4xl mb-3 opacity-40">
-                    {result.mode === "general" ? "🎬" : "📷"}
-                  </span>
-                  <p className="text-xs text-white/30">원본 (Noisy)</p>
-                </div>
-                <div className="flex flex-col items-center justify-center bg-[#101018]">
-                  <span className="text-4xl mb-3">✨</span>
-                  <p className="text-xs text-white/60">처리 후 (Denoised)</p>
-                  <p className="text-[10px] text-white/25 mt-1.5">백엔드 연결 후 표시됩니다</p>
-                </div>
+          {(["before", "after"] as const).map((side) => (
+            <div key={side} className="flex flex-col gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-white/30 text-center">
+                {side === "before" ? "원본 (Noisy)" : "처리 후 (Denoised)"}
+              </p>
+              <div className="rounded-2xl overflow-hidden bg-[#111118] border border-white/8">
+                <video
+                  src={side === "before" ? result.beforeUrl : result.afterUrl}
+                  controls
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-full aspect-video object-contain bg-black"
+                />
               </div>
-              {/* Center divider label */}
-              <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-white/15" />
             </div>
-          )}
+          ))}
         </motion.div>
 
         {/* Stats row */}
@@ -123,18 +103,17 @@ export default function ResultPage() {
 
         {/* Action buttons */}
         <div className="flex gap-3">
-          {hasImage && (
-            <button
-              onClick={() => downloadDataUrl(result.afterUrl, result.fileName)}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-blue-500 hover:bg-blue-400 text-white text-sm font-semibold transition-all hover:scale-105 shadow-lg shadow-blue-500/20"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              결과 다운로드
-            </button>
-          )}
+          <a
+            href={result.afterUrl}
+            download={`denoised_${result.fileName}`}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-blue-500 hover:bg-blue-400 text-white text-sm font-semibold transition-all hover:scale-105 shadow-lg shadow-blue-500/20"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            결과 다운로드
+          </a>
           <button
             onClick={handleRestart}
             className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-white/6 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white text-sm font-semibold transition-all"

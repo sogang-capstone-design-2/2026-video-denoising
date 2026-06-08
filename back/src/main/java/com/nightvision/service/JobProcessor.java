@@ -33,18 +33,14 @@ public class JobProcessor {
     private String resultDir;
 
     @Async("denoiseExecutor")
-    public void runInference(Job job, Path inputPath, String intensity) {
+    public void runInference(Job job, Path inputPath) {
         try {
-            // 1. QUEUED → UPLOADING
             transition(job, Job.Phase.UPLOADING, 10);
-
-            // 2. 업로드 완료
             transition(job, Job.Phase.UPLOADING, 30);
-
-            // 3. UPLOADING → PROCESSING : Python 추론 서버 호출
             transition(job, Job.Phase.PROCESSING, 35);
 
-            byte[] resultBytes = inferenceClient.infer(inputPath, job.getMode(), intensity);
+            byte[] resultBytes = inferenceClient.denoise(
+                    inputPath, job.getNoiseSigma(), job.isAddNoise(), job.isCompare());
 
             transition(job, Job.Phase.PROCESSING, 80);
 

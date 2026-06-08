@@ -4,6 +4,7 @@ import com.nightvision.model.Job;
 import com.nightvision.repository.JobRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -31,10 +32,9 @@ public class DenoiseService {
     /**
      * S2.1 — 파일 저장 → QUEUED 상태로 DB 저장 → 비동기 처리 시작 → jobId 반환
      */
-    public String submit(MultipartFile file, String mode, String intensity) {
+    public String submit(MultipartFile file, float noiseSigma, boolean addNoise, boolean compare) {
         String jobId = UUID.randomUUID().toString();
-        Job job = new Job(jobId, mode, file.getOriginalFilename());
-        // 초기 상태: QUEUED
+        Job job = new Job(jobId, file.getOriginalFilename(), noiseSigma, addNoise, compare);
         job.setPhase(Job.Phase.QUEUED);
 
         activeJobs.put(jobId, job);
@@ -42,7 +42,9 @@ public class DenoiseService {
 
         try {
             Path inputPath = saveUploadedFile(jobId, file);
-            jobProcessor.runInference(job, inputPath, intensity);
+            job.setInputPath(inputPath.toString());
+            jobRepository.save(job);
+            jobProcessor.runInference(job, inputPath);
         } catch (IOException e) {
             job.setPhase(Job.Phase.FAILED);
             job.setErrorMessage("파일 저장 실패: " + e.getMessage());
@@ -57,6 +59,13 @@ public class DenoiseService {
         Job job = activeJobs.get(jobId);
         if (job != null) return job;
         return jobRepository.findById(jobId).orElse(null);
+    }
+
+    /**
+     */
+    public List<Job> getJobs(int limit) {
+        int clampedLimit = Math.min(limit, 50);
+        return jobRepository.findJobsWithFilter(PageRequest.of(0, clampedLimit));
     }
 
     public List<Job> getRecentJobs() {
