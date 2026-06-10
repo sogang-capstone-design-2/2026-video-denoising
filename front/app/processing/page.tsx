@@ -51,7 +51,7 @@ export default function ProcessingPage() {
         setPhase("uploading");
         setProgress(10);
 
-        const jobId = await submitJob(file, s.intensity);
+        const jobId = await submitJob(file, s.mode, s.intensity);
         clearFile();
 
         setProgress(30);

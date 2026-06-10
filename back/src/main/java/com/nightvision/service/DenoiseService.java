@@ -32,9 +32,9 @@ public class DenoiseService {
     /**
      * S2.1 — 파일 저장 → QUEUED 상태로 DB 저장 → 비동기 처리 시작 → jobId 반환
      */
-    public String submit(MultipartFile file, float noiseSigma, boolean addNoise, boolean compare) {
+    public String submit(MultipartFile file, String mode, float noiseSigma, boolean addNoise, boolean compare) {
         String jobId = UUID.randomUUID().toString();
-        Job job = new Job(jobId, file.getOriginalFilename(), noiseSigma, addNoise, compare);
+        Job job = new Job(jobId, file.getOriginalFilename(), mode, noiseSigma, addNoise, compare);
         job.setPhase(Job.Phase.QUEUED);
 
         activeJobs.put(jobId, job);

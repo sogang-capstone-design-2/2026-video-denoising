@@ -43,23 +43,23 @@ class DenoiseServiceTest {
     }
 
     // ──────────────────────────────────────────
-    // submit()
+    // submit() — general 모드
     // ──────────────────────────────────────────
 
     @Test
-    void 파일제출시_jobId를_반환한다() {
+    void general_파일제출시_jobId를_반환한다() {
         MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "data".getBytes());
 
-        String jobId = denoiseService.submit(file, 25f, false, false);
+        String jobId = denoiseService.submit(file, "general", 25f, false, false);
 
         assertThat(jobId).isNotNull();
     }
 
     @Test
-    void 파일제출시_QUEUED_상태로_DB에_저장한다() {
+    void general_파일제출시_QUEUED_상태로_DB에_저장한다() {
         MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "data".getBytes());
 
-        String jobId = denoiseService.submit(file, 25f, false, false);
+        String jobId = denoiseService.submit(file, "general", 25f, false, false);
         Job job = denoiseService.getJob(jobId);
 
         assertThat(job.getPhase()).isEqualTo(Job.Phase.QUEUED);
@@ -68,34 +68,67 @@ class DenoiseServiceTest {
     }
 
     @Test
-    void 파일제출시_inputPath가_job에_저장된다() {
+    void general_파일제출시_inputPath가_job에_저장된다() {
         MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "data".getBytes());
 
-        String jobId = denoiseService.submit(file, 25f, false, false);
+        String jobId = denoiseService.submit(file, "general", 25f, false, false);
         Job job = denoiseService.getJob(jobId);
 
         assertThat(job.getInputPath()).isNotNull();
     }
 
     @Test
-    void 파일제출시_비동기_추론을_시작한다() {
+    void general_파일제출시_비동기_추론을_시작한다() {
         MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "data".getBytes());
 
-        denoiseService.submit(file, 25f, false, false);
+        denoiseService.submit(file, "general", 25f, false, false);
 
         verify(jobProcessor).runInference(any(Job.class), any(Path.class));
     }
 
     @Test
-    void 파일제출시_파라미터가_job에_정확히_전달된다() {
+    void general_파라미터가_job에_정확히_전달된다() {
         MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "data".getBytes());
 
-        String jobId = denoiseService.submit(file, 30f, true, true);
+        String jobId = denoiseService.submit(file, "general", 30f, true, true);
         Job job = denoiseService.getJob(jobId);
 
+        assertThat(job.getMode()).isEqualTo("general");
         assertThat(job.getNoiseSigma()).isEqualTo(30f);
         assertThat(job.isAddNoise()).isTrue();
         assertThat(job.isCompare()).isTrue();
+    }
+
+    // ──────────────────────────────────────────
+    // submit() — lowlight 모드
+    // ──────────────────────────────────────────
+
+    @Test
+    void lowlight_파일제출시_jobId를_반환한다() {
+        MockMultipartFile file = new MockMultipartFile("file", "frame.raw", "application/octet-stream", "data".getBytes());
+
+        String jobId = denoiseService.submit(file, "lowlight", 25f, false, false);
+
+        assertThat(jobId).isNotNull();
+    }
+
+    @Test
+    void lowlight_파일제출시_mode가_lowlight로_설정된다() {
+        MockMultipartFile file = new MockMultipartFile("file", "frame.raw", "application/octet-stream", "data".getBytes());
+
+        String jobId = denoiseService.submit(file, "lowlight", 25f, false, false);
+        Job job = denoiseService.getJob(jobId);
+
+        assertThat(job.getMode()).isEqualTo("lowlight");
+    }
+
+    @Test
+    void lowlight_파일제출시_비동기_추론을_시작한다() {
+        MockMultipartFile file = new MockMultipartFile("file", "frame.raw", "application/octet-stream", "data".getBytes());
+
+        denoiseService.submit(file, "lowlight", 25f, false, false);
+
+        verify(jobProcessor).runInference(any(Job.class), any(Path.class));
     }
 
     // ──────────────────────────────────────────
@@ -105,7 +138,7 @@ class DenoiseServiceTest {
     @Test
     void 처리중인_job_조회시_DB없이_메모리에서_반환한다() {
         MockMultipartFile file = new MockMultipartFile("file", "test.mp4", "video/mp4", "data".getBytes());
-        String jobId = denoiseService.submit(file, 25f, false, false);
+        String jobId = denoiseService.submit(file, "general", 25f, false, false);
 
         Job result = denoiseService.getJob(jobId);
 
@@ -116,7 +149,7 @@ class DenoiseServiceTest {
 
     @Test
     void 메모리에_없는_job_조회시_DB에서_조회한다() {
-        Job dbJob = new Job("old-job", "old.mp4", 25f, false, false);
+        Job dbJob = new Job("old-job", "old.mp4", "general", 25f, false, false);
         given(jobRepository.findById("old-job")).willReturn(Optional.of(dbJob));
 
         Job result = denoiseService.getJob("old-job");
@@ -141,7 +174,7 @@ class DenoiseServiceTest {
 
     @Test
     void limit으로_필터링된_목록을_반환한다() {
-        Job job = new Job("job-1", "test.mp4", 25f, false, false);
+        Job job = new Job("job-1", "test.mp4", "general", 25f, false, false);
         given(jobRepository.findJobsWithFilter(any(Pageable.class))).willReturn(List.of(job));
 
         List<Job> result = denoiseService.getJobs(5);

@@ -57,7 +57,7 @@ export default function ResultPage() {
 
         <p className="text-sm text-white/40 mb-8">{result.fileName}</p>
 
-        {/* Before / After video players */}
+        {/* Before / After 미디어 */}
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -70,15 +70,23 @@ export default function ResultPage() {
                 {side === "before" ? "원본 (Noisy)" : "처리 후 (Denoised)"}
               </p>
               <div className="rounded-2xl overflow-hidden bg-[#111118] border border-white/8">
-                <video
-                  src={side === "before" ? result.beforeUrl : result.afterUrl}
-                  controls
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  className="w-full aspect-video object-contain bg-black"
-                />
+                {result.mode === "lowlight" ? (
+                  <img
+                    src={side === "before" ? result.beforeUrl : result.afterUrl}
+                    alt={side === "before" ? "원본" : "디노이즈 결과"}
+                    className="w-full aspect-video object-contain bg-black"
+                  />
+                ) : (
+                  <video
+                    src={side === "before" ? result.beforeUrl : result.afterUrl}
+                    controls
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full aspect-video object-contain bg-black"
+                  />
+                )}
               </div>
             </div>
           ))}
