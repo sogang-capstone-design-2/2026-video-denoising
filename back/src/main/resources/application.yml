@@ -20,7 +20,7 @@ spring:
     show-sql: false
 
 app:
-  inference-base-url: ${INFERENCE_BASE_URL:http://120.238.149.205:33749}
+  inference-base-url: ${INFERENCE_BASE_URL:http://70.30.158.46:57243}
   inference-api-key: ${INFERENCE_API_KEY}
   upload-dir: ./uploads
   result-dir: ./results

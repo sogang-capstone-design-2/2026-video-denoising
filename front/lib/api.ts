@@ -17,15 +17,21 @@ const INTENSITY_TO_SIGMA: Record<ProcessingIntensity, number> = {
 
 export async function submitJob(
   file: File,
+  mode: "general" | "lowlight",
   intensity: ProcessingIntensity,
   addNoise = false,
   compare = false
 ): Promise<string> {
   const form = new FormData();
   form.append("file", file);
-  form.append("noiseSigma", String(INTENSITY_TO_SIGMA[intensity]));
-  form.append("addNoise", String(addNoise));
-  form.append("compare", String(compare));
+  form.append("mode", mode);
+
+  // lowlight(RAW) 모드는 noise_sigma 등 영상 파라미터 불필요 — 서버 기본값 사용
+  if (mode === "general") {
+    form.append("noiseSigma", String(INTENSITY_TO_SIGMA[intensity]));
+    form.append("addNoise", String(addNoise));
+    form.append("compare", String(compare));
+  }
 
   const res = await fetch("/api/jobs", { method: "POST", body: form });
   if (!res.ok) {

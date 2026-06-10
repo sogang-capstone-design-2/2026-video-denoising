@@ -34,11 +34,12 @@ public class DenoiseController {
     @PostMapping("/jobs")
     public ResponseEntity<Map<String, String>> createJob(
             @RequestParam("file") MultipartFile file,
+            @RequestParam(defaultValue = "general") String mode,
             @RequestParam(defaultValue = "25") float noiseSigma,
             @RequestParam(defaultValue = "false") boolean addNoise,
             @RequestParam(defaultValue = "false") boolean compare
     ) {
-        String jobId = denoiseService.submit(file, noiseSigma, addNoise, compare);
+        String jobId = denoiseService.submit(file, mode, noiseSigma, addNoise, compare);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("jobId", jobId));
     }
 
@@ -89,6 +90,7 @@ public class DenoiseController {
         // 완료 → 200 OK + 메타데이터
         Map<String, Object> result = new HashMap<>();
         result.put("jobId", job.getJobId());
+        result.put("mode", job.getMode());
         result.put("noiseSigma", job.getNoiseSigma());
         result.put("addNoise", job.isAddNoise());
         result.put("compare", job.isCompare());
@@ -106,14 +108,19 @@ public class DenoiseController {
     @GetMapping("/jobs/{jobId}/files/before")
     public ResponseEntity<Resource> getBeforeFile(@PathVariable String jobId) {
         Job job = denoiseService.getJob(jobId);
-        if (job == null || job.getInputPath() == null) {
-            return ResponseEntity.notFound().build();
-        }
+        if (job == null) return ResponseEntity.notFound().build();
 
-        Path filePath = Path.of(job.getInputPath());
+        // lowlight: noisyImagePath(noisy.png) 우선, 없으면 원본 RAW
+        String rawPath = job.getNoisyImagePath() != null
+                ? job.getNoisyImagePath()
+                : job.getInputPath();
+        if (rawPath == null) return ResponseEntity.notFound().build();
+
+        Path filePath = Path.of(rawPath);
+        String fileName = filePath.getFileName().toString();
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename*=UTF-8''" + encodeFilename(job.getOriginalFileName()))
+                        "attachment; filename*=UTF-8''" + encodeFilename(fileName))
                 .contentType(MediaType.parseMediaType(detectContentType(filePath)))
                 .body(new FileSystemResource(filePath));
     }
