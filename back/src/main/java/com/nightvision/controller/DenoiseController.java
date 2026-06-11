@@ -64,6 +64,10 @@ public class DenoiseController {
         if (job.isFailed()) {
             response.put("error", job.getErrorMessage());
         }
+        // lowlight: noisy 이미지가 준비된 시점부터 프론트에 알림 (추론 완료 전이어도)
+        if (job.getNoisyImagePath() != null) {
+            response.put("noisyImageUrl", "/api/jobs/" + jobId + "/files/before");
+        }
 
         return ResponseEntity.ok(response);
     }
@@ -137,9 +141,20 @@ public class DenoiseController {
         }
 
         Path filePath = Path.of(job.getResultPath());
+        // general: denoised_원본파일명.mp4 / lowlight: denoised_원본파일명.png (확장자 교체)
+        String original = job.getOriginalFileName();
+        String downloadName;
+        if ("lowlight".equals(job.getMode())) {
+            String base = original.contains(".")
+                    ? original.substring(0, original.lastIndexOf('.'))
+                    : original;
+            downloadName = "denoised_" + base + ".png";
+        } else {
+            downloadName = "denoised_" + original;
+        }
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename*=UTF-8''" + encodeFilename("denoised_" + job.getOriginalFileName()))
+                        "attachment; filename*=UTF-8''" + encodeFilename(downloadName))
                 .contentType(MediaType.parseMediaType(detectContentType(filePath)))
                 .body(new FileSystemResource(filePath));
     }

@@ -6,6 +6,8 @@ export interface JobStatus {
   phase: JobPhase;
   percent: number;
   resultUrl?: string;
+  /** lowlight 모드에서 noisy PNG가 준비되면 설정됨 */
+  noisyImageUrl?: string;
   error?: string;
 }
 

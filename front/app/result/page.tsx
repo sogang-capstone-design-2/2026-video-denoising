@@ -5,12 +5,19 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { loadResultSession, clearSessions } from "@/lib/session";
+import { getJobStatus } from "@/lib/api";
 import type { ResultSession } from "@/types";
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default function ResultPage() {
   const router = useRouter();
   const [result, setResult] = useState<ResultSession | null>(null);
+  const [afterUrl, setAfterUrl] = useState<string | null>(null);
+  const [isDenoising, setIsDenoising] = useState(false);
+  const [denoisedError, setDenoisedError] = useState<string | null>(null);
 
+  // 세션 로드
   useEffect(() => {
     const r = loadResultSession();
     if (!r) {
@@ -18,7 +25,40 @@ export default function ResultPage() {
       return;
     }
     setResult(r);
+    setAfterUrl(r.afterUrl);
+    setIsDenoising(r.afterUrl === null);
   }, [router]);
+
+  // lowlight: afterUrl이 null이면 denoised 완료까지 폴링
+  useEffect(() => {
+    if (!result || !isDenoising) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        while (!cancelled) {
+          const status = await getJobStatus(result.jobId);
+
+          if (status.phase === "failed") {
+            setDenoisedError(status.error ?? "디노이즈 처리 실패");
+            setIsDenoising(false);
+            return;
+          }
+          if (status.phase === "done") {
+            const url = `/api/jobs/${result.jobId}/files/after`;
+            setAfterUrl(url);
+            setIsDenoising(false);
+            return;
+          }
+          await sleep(2000);
+        }
+      } catch {
+        if (!cancelled) setDenoisedError("상태 조회 중 오류가 발생했습니다.");
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [result, isDenoising]);
 
   const handleRestart = () => {
     clearSessions();
@@ -52,7 +92,7 @@ export default function ResultPage() {
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/12 border border-green-500/25 text-xs text-green-300 font-medium mb-6"
         >
-          ✓ 처리가 완료되었습니다
+          ✓ {isDenoising ? "입력 이미지 준비 완료 — 디노이즈 처리 중..." : "처리가 완료되었습니다"}
         </motion.div>
 
         <p className="text-sm text-white/40 mb-8">{result.fileName}</p>
@@ -64,32 +104,59 @@ export default function ResultPage() {
           transition={{ duration: 0.5 }}
           className="w-full mb-8 grid grid-cols-2 gap-4"
         >
-          {(["before", "after"] as const).map((side) => (
-            <div key={side} className="flex flex-col gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-white/30 text-center">
-                {side === "before" ? "원본 (Noisy)" : "처리 후 (Denoised)"}
-              </p>
-              <div className="rounded-2xl overflow-hidden bg-[#111118] border border-white/8">
-                {result.mode === "lowlight" ? (
-                  <img
-                    src={side === "before" ? result.beforeUrl : result.afterUrl}
-                    alt={side === "before" ? "원본" : "디노이즈 결과"}
-                    className="w-full aspect-video object-contain bg-black"
-                  />
-                ) : (
-                  <video
-                    src={side === "before" ? result.beforeUrl : result.afterUrl}
-                    controls
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    className="w-full aspect-video object-contain bg-black"
-                  />
-                )}
-              </div>
+          {/* Before */}
+          <div className="flex flex-col gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-white/30 text-center">
+              원본 (Noisy)
+            </p>
+            <div className="rounded-2xl overflow-hidden bg-[#111118] border border-white/8">
+              {result.mode === "lowlight" ? (
+                <img
+                  src={result.beforeUrl}
+                  alt="원본"
+                  className="w-full aspect-video object-contain bg-black"
+                />
+              ) : (
+                <video
+                  src={result.beforeUrl}
+                  controls autoPlay loop muted playsInline
+                  className="w-full aspect-video object-contain bg-black"
+                />
+              )}
             </div>
-          ))}
+          </div>
+
+          {/* After */}
+          <div className="flex flex-col gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-white/30 text-center">
+              처리 후 (Denoised)
+            </p>
+            <div className="rounded-2xl overflow-hidden bg-[#111118] border border-white/8">
+              {denoisedError ? (
+                <div className="flex flex-col items-center justify-center aspect-video text-center px-4">
+                  <span className="text-2xl mb-2">⚠️</span>
+                  <p className="text-xs text-red-400">{denoisedError}</p>
+                </div>
+              ) : isDenoising || !afterUrl ? (
+                <div className="flex flex-col items-center justify-center aspect-video gap-3">
+                  <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-blue-400 animate-spin" />
+                  <p className="text-xs text-white/30">RViDeNet 추론 중...</p>
+                </div>
+              ) : result.mode === "lowlight" ? (
+                <img
+                  src={afterUrl}
+                  alt="디노이즈 결과"
+                  className="w-full aspect-video object-contain bg-black"
+                />
+              ) : (
+                <video
+                  src={afterUrl}
+                  controls autoPlay loop muted playsInline
+                  className="w-full aspect-video object-contain bg-black"
+                />
+              )}
+            </div>
+          </div>
         </motion.div>
 
         {/* Stats row */}
@@ -111,17 +178,23 @@ export default function ResultPage() {
 
         {/* Action buttons */}
         <div className="flex gap-3">
-          <a
-            href={result.afterUrl}
-            download={`denoised_${result.fileName}`}
-            className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-blue-500 hover:bg-blue-400 text-white text-sm font-semibold transition-all hover:scale-105 shadow-lg shadow-blue-500/20"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            결과 다운로드
-          </a>
+          {afterUrl && !isDenoising && (
+            <a
+              href={afterUrl}
+              download={
+                result.mode === "lowlight"
+                  ? `denoised_${result.fileName.replace(/\.[^.]+$/, "")}.png`
+                  : `denoised_${result.fileName}`
+              }
+              className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-blue-500 hover:bg-blue-400 text-white text-sm font-semibold transition-all hover:scale-105 shadow-lg shadow-blue-500/20"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              결과 다운로드
+            </a>
+          )}
           <button
             onClick={handleRestart}
             className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-white/6 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white text-sm font-semibold transition-all"

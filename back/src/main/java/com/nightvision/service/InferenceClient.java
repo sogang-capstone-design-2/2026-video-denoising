@@ -21,10 +21,10 @@ import java.time.Duration;
 
 /**
  * 외부 AI 추론 서버 클라이언트
- * - POST /denoise      : FastDVDnet 영상 디노이징 → mp4
- * - POST /denoise/raw  : RViDeNet RAW 디노이징   → ZIP (noisy.png + denoised.png)
  *
- * FileSystemResource 스트리밍으로 파일을 전송합니다.
+ * POST /denoise/video  : FastDVDnet 영상 디노이징 → mp4
+ * POST /denoise/raw    : RViDeNet RAW 디노이징   → denoised PNG
+ * POST /visualize/raw  : RAW 입력 시각화 (추론 없음) → noisy PNG
  */
 @Component
 public class InferenceClient {
@@ -38,8 +38,11 @@ public class InferenceClient {
     @Value("${app.inference.timeout-minutes:20}")
     private int timeoutMinutes;
 
-    @Value("${app.inference.max-retries:2}")
+    @Value("${app.inference.max-retries:3}")
     private int maxRetries;
+
+    @Value("${app.inference.retry-backoff-seconds:10}")
+    private int retryBackoffSeconds;
 
     private WebClient webClient;
 
@@ -63,21 +66,37 @@ public class InferenceClient {
                 .build();
     }
 
-    /** POST /denoise → denoised mp4 바이트 반환 */
+    /** POST /denoise/video → denoised mp4 바이트 반환 */
     public byte[] denoise(Path inputFile, float noiseSigma, boolean addNoise, boolean compare) {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("file", new FileSystemResource(inputFile));
         body.add("noise_sigma", noiseSigma);
         body.add("add_noise", addNoise);
         body.add("compare", compare);
-        return call("/denoise", body);
+        return call("/denoise/video", body);
     }
 
-    /** POST /denoise/raw → ZIP 바이트 반환 (noisy.png + denoised.png) */
+    /**
+     * POST /denoise/raw → denoised PNG 바이트 반환 (RViDeNet 추론 결과)
+     * 모든 RAW 파라미터는 서버 기본값 사용 (height=1080, width=1920 등)
+     */
     public byte[] denoiseRaw(Path inputFile) {
+        return call("/denoise/raw", buildRawBody(inputFile));
+    }
+
+    /**
+     * POST /visualize/raw → noisy PNG 바이트 반환 (추론 없이 입력 시각화)
+     * /denoise/raw 추론 전에 먼저 호출하여 입력 이미지를 빠르게 표시
+     */
+    public byte[] visualizeRaw(Path inputFile) {
+        return call("/visualize/raw", buildRawBody(inputFile));
+    }
+
+    /** RAW 요청 공통 body 생성 — 파라미터는 서버 기본값 사용 */
+    private MultiValueMap<String, Object> buildRawBody(Path inputFile) {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("file", new FileSystemResource(inputFile));
-        return call("/denoise/raw", body);
+        return body;
     }
 
     private byte[] call(String uri, MultiValueMap<String, Object> body) {
@@ -87,7 +106,6 @@ public class InferenceClient {
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .bodyValue(body)
                 .retrieve()
-                // 4xx/5xx 모두 WebClientResponseException으로 던져야 retry 필터가 정확히 동작함
                 .onStatus(
                         status -> status.is4xxClientError() || status.is5xxServerError(),
                         response -> response.bodyToMono(String.class)
@@ -97,14 +115,11 @@ public class InferenceClient {
                 )
                 .bodyToMono(byte[].class)
                 .timeout(Duration.ofMinutes(timeoutMinutes))
-                .retryWhen(Retry.backoff(maxRetries, Duration.ofSeconds(3))
+                .retryWhen(Retry.backoff(maxRetries, Duration.ofSeconds(retryBackoffSeconds))
                         .filter(e -> {
-                            // PrematureCloseException: 서버가 업로드 중 연결을 닫음 → 재시도 불필요
                             if (e instanceof PrematureCloseException) return false;
-                            // 4xx 클라이언트 오류(401 포함) → 재시도 불필요
                             if (e instanceof WebClientResponseException ex
                                     && ex.getStatusCode().is4xxClientError()) return false;
-                            // 5xx 서버 오류 / 네트워크 오류 → 재시도
                             return true;
                         })
                         .onRetryExhaustedThrow((spec, signal) ->

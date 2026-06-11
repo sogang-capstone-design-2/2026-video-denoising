@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { loadUploadSession, saveResultSession } from "@/lib/session";
 import { getFile, clearFile } from "@/lib/fileStore";
-import { submitJob, pollUntilDone } from "@/lib/api";
+import { submitJob, pollUntilDone, getJobStatus } from "@/lib/api";
 import type { JobPhase } from "@/lib/api";
 import type { UploadSession } from "@/types";
 
@@ -28,6 +28,8 @@ function toUiPhase(phase: JobPhase): UiPhase {
   if (phase === "finalizing" || phase === "done") return "finalizing";
   return "uploading";
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default function ProcessingPage() {
   const router = useRouter();
@@ -56,21 +58,63 @@ export default function ProcessingPage() {
 
         setProgress(30);
 
-        await pollUntilDone(
-          jobId,
-          (status) => {
+        if (s.mode === "lowlight") {
+          // lowlight: noisy PNG가 준비되는 즉시 result 페이지로 이동
+          let noisyNavigated = false;
+          while (true) {
+            const status = await getJobStatus(jobId);
             setPhase(toUiPhase(status.phase));
             setProgress(status.percent);
-          }
-        );
 
-        saveResultSession({
-          mode: s.mode,
-          fileName: s.fileName,
-          beforeUrl: `/api/jobs/${jobId}/files/before`,
-          afterUrl: `/api/jobs/${jobId}/files/after`,
-        });
-        router.push("/result");
+            if (status.phase === "failed") {
+              throw new Error(status.error ?? "처리 실패");
+            }
+
+            // noisy 준비됨 → 즉시 이동 (denoised는 result 페이지에서 대기)
+            if (status.noisyImageUrl && !noisyNavigated) {
+              noisyNavigated = true;
+              saveResultSession({
+                jobId,
+                mode: s.mode,
+                fileName: s.fileName,
+                beforeUrl: `/api/jobs/${jobId}/files/before`,
+                afterUrl: null, // denoised 아직 처리 중
+              });
+              router.push("/result");
+              return;
+            }
+
+            // fallback: noisyImageUrl 없이 바로 완료된 경우
+            if (status.phase === "done") {
+              saveResultSession({
+                jobId,
+                mode: s.mode,
+                fileName: s.fileName,
+                beforeUrl: `/api/jobs/${jobId}/files/before`,
+                afterUrl: `/api/jobs/${jobId}/files/after`,
+              });
+              router.push("/result");
+              return;
+            }
+
+            await sleep(1500);
+          }
+        } else {
+          // general: 완료될 때까지 폴링 후 이동
+          await pollUntilDone(jobId, (status) => {
+            setPhase(toUiPhase(status.phase));
+            setProgress(status.percent);
+          });
+
+          saveResultSession({
+            jobId,
+            mode: s.mode,
+            fileName: s.fileName,
+            beforeUrl: `/api/jobs/${jobId}/files/before`,
+            afterUrl: `/api/jobs/${jobId}/files/after`,
+          });
+          router.push("/result");
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "알 수 없는 오류가 발생했습니다.");
       }

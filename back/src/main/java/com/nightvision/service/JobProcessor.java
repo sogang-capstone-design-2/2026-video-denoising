@@ -7,14 +7,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
  * 비동기 추론 실행기
@@ -24,8 +19,8 @@ import java.util.zip.ZipInputStream;
  *                               └─────▶ FAILED
  *
  * mode에 따라 분기:
- *   general  → POST /denoise      → denoised mp4 저장
- *   lowlight → POST /denoise/raw  → ZIP 추출 → noisy.png / denoised.png 저장
+ *   general  → POST /denoise/video → denoised mp4
+ *   lowlight → POST /visualize/raw (noisy PNG 먼저) → POST /denoise/raw (denoised PNG)
  */
 @Component
 @RequiredArgsConstructor
@@ -74,26 +69,21 @@ public class JobProcessor {
     // ── lowlight: RViDeNet ────────────────────────────────────────────────
 
     private void runRaw(Job job, Path inputPath) throws IOException {
-        byte[] zipBytes = inferenceClient.denoiseRaw(inputPath);
+        // 1단계: /visualize/raw — 추론 없이 noisy PNG 빠르게 생성
+        byte[] noisyBytes = inferenceClient.visualizeRaw(inputPath);
+        Path noisyPath = saveFile(job.getJobId(), "noisy.png", noisyBytes);
+        job.setNoisyImagePath(noisyPath.toString());
+        jobRepository.save(job); // before 이미지 먼저 DB 반영
+
+        transition(job, Job.Phase.PROCESSING, 55);
+
+        // 2단계: /denoise/raw — RViDeNet 추론으로 denoised PNG 생성
+        byte[] denoisedBytes = inferenceClient.denoiseRaw(inputPath);
 
         transition(job, Job.Phase.PROCESSING, 80);
         transition(job, Job.Phase.FINALIZING, 90);
 
-        // ZIP에서 noisy.png / denoised.png 추출
-        Map<String, byte[]> entries = extractZip(zipBytes);
-
-        byte[] noisyBytes    = entries.get("noisy.png");
-        byte[] denoisedBytes = entries.get("denoised.png");
-
-        if (noisyBytes == null || denoisedBytes == null) {
-            throw new RuntimeException("추론 서버 ZIP 응답에 noisy.png / denoised.png 가 없습니다.");
-        }
-
-        Path noisyPath    = saveFile(job.getJobId(), "noisy.png",    noisyBytes);
         Path denoisedPath = saveFile(job.getJobId(), "denoised.png", denoisedBytes);
-
-        // before 요청 시 시각화된 noisy.png 제공
-        job.setNoisyImagePath(noisyPath.toString());
         job.setResultPath(denoisedPath.toString());
 
         transition(job, Job.Phase.DONE, 100);
@@ -113,17 +103,5 @@ public class JobProcessor {
         Path dest = dir.resolve(fileName);
         Files.write(dest, bytes);
         return dest;
-    }
-
-    private Map<String, byte[]> extractZip(byte[] zipBytes) throws IOException {
-        Map<String, byte[]> entries = new HashMap<>();
-        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
-            ZipEntry entry;
-            while ((entry = zis.getNextEntry()) != null) {
-                entries.put(entry.getName(), zis.readAllBytes());
-                zis.closeEntry();
-            }
-        }
-        return entries;
     }
 }
