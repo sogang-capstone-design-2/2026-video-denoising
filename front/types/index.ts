@@ -12,8 +12,10 @@ export interface UploadSession {
 }
 
 export interface ResultSession {
+  jobId: string;
   mode: Mode;
   fileName: string;
   beforeUrl: string;
-  afterUrl: string;
+  /** lowlight 모드에서 denoised 처리 전이면 null */
+  afterUrl: string | null;
 }

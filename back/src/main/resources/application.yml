@@ -26,4 +26,5 @@ app:
   result-dir: ./results
   inference:
     timeout-minutes: 20
-    max-retries: 2
+    max-retries: 3
+    retry-backoff-seconds: 10
