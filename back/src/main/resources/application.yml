@@ -1,5 +1,12 @@
 server:
   port: 8080
+  tomcat:
+    connection-timeout: 600000  # 10분
+    keep-alive-timeout: 600000
+    max-http-header-size: 16777216  # 16MB
+    max-post-size: 2147483648  # 2GB
+    threads:
+      max: 200
 
 spring:
   servlet:
@@ -13,11 +20,18 @@ spring:
     password:
   h2:
     console:
-      enabled: true   # http://localhost:8080/h2-console 로 DB 조회 가능
+      enabled: true
   jpa:
     hibernate:
       ddl-auto: update
     show-sql: false
+
+logging:
+  level:
+    com.nightvision: DEBUG
+    reactor.netty: DEBUG
+    org.springframework.web.reactive: DEBUG
+    org.springframework.web.servlet: DEBUG
 
 app:
   inference-base-url: ${INFERENCE_BASE_URL:http://70.30.158.46:57243}

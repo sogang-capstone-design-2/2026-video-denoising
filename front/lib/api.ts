@@ -6,7 +6,6 @@ export interface JobStatus {
   phase: JobPhase;
   percent: number;
   resultUrl?: string;
-  /** lowlight 모드에서 noisy PNG가 준비되면 설정됨 */
   noisyImageUrl?: string;
   error?: string;
 }
@@ -16,6 +15,9 @@ const INTENSITY_TO_SIGMA: Record<ProcessingIntensity, number> = {
   medium: 25,
   high: 40,
 };
+
+// 백엔드 Base URL (프록시 거치지 않고 직접)
+const BACKEND_URL = "http://localhost:8080";
 
 export async function submitJob(
   file: File,
@@ -28,14 +30,17 @@ export async function submitJob(
   form.append("file", file);
   form.append("mode", mode);
 
-  // lowlight(RAW) 모드는 noise_sigma 등 영상 파라미터 불필요 — 서버 기본값 사용
   if (mode === "general") {
     form.append("noiseSigma", String(INTENSITY_TO_SIGMA[intensity]));
     form.append("addNoise", String(addNoise));
     form.append("compare", String(compare));
   }
 
-  const res = await fetch("/api/jobs", { method: "POST", body: form });
+  // 프록시 거치지 않고 백엔드에 직접 요청
+  const res = await fetch(`${BACKEND_URL}/api/jobs`, {
+    method: "POST",
+    body: form,
+  });
   if (!res.ok) {
     const msg = await res.text().catch(() => res.statusText);
     throw new Error(`업로드 실패 (${res.status}): ${msg}`);
@@ -45,15 +50,11 @@ export async function submitJob(
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatus> {
-  const res = await fetch(`/api/jobs/${jobId}/status`);
+  const res = await fetch(`${BACKEND_URL}/api/jobs/${jobId}/status`);
   if (!res.ok) throw new Error(`상태 조회 실패 (${res.status})`);
   return res.json() as Promise<JobStatus>;
 }
 
-/**
- * Polls /api/jobs/{jobId}/status until done or failed.
- * Calls onProgress on every tick. Rejects on failure or error phase.
- */
 export async function pollUntilDone(
   jobId: string,
   onProgress: (status: JobStatus) => void,
